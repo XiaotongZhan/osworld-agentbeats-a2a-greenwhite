@@ -1,26 +1,26 @@
 ---
-title: AWS GIT COLLAB GUIDE
-author: Zhan Xiaotong
+title: AWS Git Collaboration Guide
+author: Sean Zhan
 date: 2025-10-30
 ---
 
-# 1. 准备个人工作目录
+# 1. Prepare Your Working Directory
 
-创建一个自己的独立文件夹，例如：
+Create your own workspace folder, for example:
 
 ```bash
 mkdir -p ~/zxt && cd ~/zxt
 ````
 
-# 2. 生成个人 SSH 密钥（每人一把，不会冲突）
+# 2. Generate a Personal SSH Key (One per Person)
 
-注意文件名使用自己的名字缩写或 ID，比如 `id_ed25519_zxt`：
+Use your own name or ID in the filename, such as `id_ed25519_zxt`:
 
 ```bash
-ssh-keygen -t ed25519 -C "你的GitHub邮箱" -f ~/.ssh/id_ed25519_zxt -N ""
+ssh-keygen -t ed25519 -C "your_github_email@example.com" -f ~/.ssh/id_ed25519_zxt -N ""
 ```
 
-启动 ssh-agent 并加载密钥：
+Start the SSH agent and add the key:
 
 ```bash
 eval "$(ssh-agent -s)"
@@ -29,18 +29,18 @@ chmod 700 ~/.ssh
 chmod 600 ~/.ssh/id_ed25519_zxt ~/.ssh/id_ed25519_zxt.pub
 ```
 
-# 3. 配置 SSH 别名（让 Git 知道用哪把钥匙）
+# 3. Configure SSH Alias (So Git Knows Which Key to Use)
 
-打开或创建配置文件：
+Open or create the SSH configuration file:
 
 ```bash
 nano ~/.ssh/config
 ```
 
-在文件末尾添加：
+Add the following lines at the end:
 
 ```bash
-# === zxt 专用 GitHub SSH 配置 ===
+# === GitHub SSH Config for zxt ===
 Host github-zxt
     HostName github.com
     User git
@@ -48,46 +48,46 @@ Host github-zxt
     IdentitiesOnly yes
 ```
 
-保存退出：
+Save and exit:
 
-* `Ctrl + O` → 回车保存
-* `Ctrl + X` → 退出编辑器
+* Press `Ctrl + O` → Enter to save
+* Press `Ctrl + X` → Exit the editor
 
-然后设置权限：
+Then set the correct permissions:
 
 ```bash
 chmod 600 ~/.ssh/config
 ```
 
-# 4. 把公钥加到 GitHub
+# 4. Add Your Public Key to GitHub
 
-查看公钥内容：
+Display your public key:
 
 ```bash
 cat ~/.ssh/id_ed25519_zxt.pub
 ```
 
-复制整行内容，然后在 GitHub 中操作：
+Copy the entire line and add it to GitHub:
 
 **GitHub → Settings → SSH and GPG keys → New SSH key**
 
-* **Title**: `aws-zxt`
-* **Key**: 粘贴刚才复制的内容
-* 点击 **Add SSH key**
+* **Title:** `aws-zxt`
+* **Key:** paste the copied content
+* Click **Add SSH key**
 
-验证是否配置成功：
+Verify that your key works:
 
 ```bash
 ssh -T git@github-zxt
 ```
 
-成功提示示例：
+Expected success message:
 
 ```bash
-Hi <你的GitHub用户名>! You've successfully authenticated, but GitHub does not provide shell access.
+Hi <your_github_username>! You've successfully authenticated, but GitHub does not provide shell access.
 ```
 
-# 5. 克隆仓库（用你自己的别名）
+# 5. Clone the Repository (Using Your Alias)
 
 ```bash
 cd ~/zxt
@@ -95,14 +95,14 @@ git clone git@github-zxt:XiaotongZhan/cs294-ai-agent.git
 cd cs294-ai-agent
 ```
 
-# 6. 设置仓库级 Git 身份（只影响当前仓库）
+# 6. Set Local Git Identity (Affects This Repository Only)
 
 ```bash
 git config user.name  "Zhan Xiaotong"
-git config user.email "你的邮箱@example.com"
+git config user.email "your_email@example.com"
 ```
 
-验证配置：
+Verify your settings:
 
 ```bash
 git config --list

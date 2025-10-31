@@ -1,9 +1,99 @@
+# ===============================
+#  Python and Poetry Environment
+# ===============================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment folders
+.venv/
+venv/
+env/
+.conda/
+
+# Poetry and pip cache
+.poetry/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+
+# Compiled C extensions
+*.so
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# ===============================
+#  Environment & Configuration
+# ===============================
+
+# Environment variables
 .env
+.env.*
 
+# Local settings and credentials
+*.secret
+*.pem
+*.key
+
+# ===============================
+#  Build, Logs, and Results
+# ===============================
+
+# Experiment results and logs
 results/
-
 logs/
+output/
+runs/
+wandb/
+checkpoints/
+tmp/
+cache/
 
+# Metrics or generated JSON outputs
 *.json
 
-__pycache__/
+# ===============================
+#  OSWorld / AgentBeats Artifacts
+# ===============================
+
+# Auto-generated data and screenshots
+third_party/osworld/tmp/
+third_party/osworld/cache/
+third_party/osworld/screenshots/
+
+# AgentBeats evaluation results
+third_party/agentbeats/results/
+third_party/agentbeats/logs/
+
+# ===============================
+#  IDE / Editor Specific
+# ===============================
+
+# VSCode
+.vscode/
+.history/
+
+# PyCharm / IntelliJ
+.idea/
+
+# Mac / Windows system files
+.DS_Store
+Thumbs.db
+
+# ===============================
+#  Miscellaneous
+# ===============================
+
+# Temporary or backup files
+*.bak
+*.swp
+*.tmp
+
+# Compressed files
+*.zip
+*.tar
+*.gz
+*.7z
