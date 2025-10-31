@@ -1,0 +1,90 @@
+[project]
+name = "cs294-ai-agent"
+version = "0.1.0"
+description = "Agentic AI course project environment with OSWorld and AgentBeats benchmarks"
+authors = [
+    {name = "Zhan Xiaotong",email = "xiaotong.zhan01@gmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10,<3.12"
+dependencies = [
+    "numpy>=1.24.4,<1.25.0",
+    "pillow>=11.0.0,<11.1.0",
+    "fabric>=3.2.2,<4.0.0",
+    "gymnasium>=0.28.1,<0.29.0",
+    "requests>=2.32.5,<3.0.0",
+    "pytz>=2024.1,<2025.0",
+    "transformers>=4.35.2,<4.36.0",
+    "torch>=2.5.0,<2.6.0",
+    "accelerate>=1.11.0,<2.0.0",
+    "opencv-python-headless>=4.8.1.78,<4.9.0.0",
+    "matplotlib>=3.7.4,<3.8.0",
+    "pynput>=1.7.6,<1.8.0",
+    "pyautogui>=0.9.54,<0.10.0",
+    "psutil>=5.9.6,<5.10.0",
+    "tqdm>=4.65.0,<4.66.0",
+    "pandas>=2.2.3,<2.3.0",
+    "flask>=3.0.0,<3.1.0",
+    "requests-toolbelt>=1.0.0,<1.1.0",
+    "ag2>=0.9.7,<0.10.0",
+    "lxml>=5.2.1,<6.0.0",
+    "cssselect>=1.3.0,<2.0.0",
+    "xmltodict>=1.0.2,<2.0.0",
+    "openpyxl>=3.1.5,<4.0.0",
+    "python-docx>=1.2.0,<2.0.0",
+    "python-pptx>=1.0.2,<2.0.0",
+    "pypdf>=6.1.3,<7.0.0",
+    "pygetwindow>=0.0.9,<0.0.10",
+    "rapidfuzz>=3.14.2,<4.0.0",
+    "pyacoustid>=1.3.0,<2.0.0",
+    "pygame>=2.6.1,<3.0.0",
+    "imagehash>=4.3.2,<5.0.0",
+    "scikit-image>=0.25.2,<0.26.0",
+    "librosa>=0.11.0,<0.12.0",
+    "pymupdf>=1.26.5,<2.0.0",
+    "chardet>=5.2.0,<6.0.0",
+    "playwright>=1.55.0,<2.0.0",
+    "backoff>=2.2.1,<3.0.0",
+    "formulas>=1.3.2,<2.0.0",
+    "pydrive>=1.3.1,<2.0.0",
+    "fastdtw>=0.3.4,<0.4.0",
+    "odfpy>=1.4.1,<2.0.0",
+    "openai>=2.6.1,<3.0.0",
+    "func-timeout>=4.3.5,<5.0.0",
+    "beautifulsoup4>=4.14.2,<5.0.0",
+    "dashscope>=1.24.9,<2.0.0",
+    "google-generativeai>=0.8.5,<0.9.0",
+    "pyyaml>=6.0.3,<7.0.0",
+    "mutagen>=1.47.0,<2.0.0",
+    "easyocr>=1.7.2,<2.0.0",
+    "borb>=3.0.2,<4.0.0",
+    "pypdf2>=3.0.1,<4.0.0",
+    "pdfplumber>=0.11.7,<0.12.0",
+    "wandb>=0.22.3,<0.23.0",
+    "wrapt-timeout-decorator>=1.5.1,<2.0.0",
+    "gdown>=5.2.0,<6.0.0",
+    "tiktoken>=0.12.0,<0.13.0",
+    "groq>=0.33.0,<0.34.0",
+    "boto3>=1.40.63,<2.0.0",
+    "azure-identity>=1.25.1,<2.0.0",
+    "azure-mgmt-compute>=37.0.1,<38.0.0",
+    "azure-mgmt-network>=30.0.0,<31.0.0",
+    "docker>=7.1.0,<8.0.0",
+    "loguru>=0.7.3,<0.8.0",
+    "python-dotenv>=1.0.1,<2.0.0",
+    "tldextract>=5.3.0,<6.0.0",
+    "anthropic>=0.72.0,<0.73.0",
+    "alibabacloud-ecs20140526>=7.2.5,<8.0.0",
+    "alibabacloud-tea-openapi>=0.4.1,<0.5.0",
+    "alibabacloud-tea-util>=0.3.13,<0.4.0",
+    "json-minify>=0.3.0,<0.4.0"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false

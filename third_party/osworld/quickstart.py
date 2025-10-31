@@ -1,3 +1,4 @@
+import os
 from desktop_env.desktop_env import DesktopEnv
 import argparse
 
@@ -39,6 +40,7 @@ parser.add_argument("--path_to_vm", type=str, default=None)
 parser.add_argument("--os_type", type=str, default="Ubuntu")
 parser.add_argument("--action_space", type=str, default="pyautogui")
 parser.add_argument("--headless", type=bool, default=False) # Set to True if you want to run without GUI
+parser.add_argument("--region", type=str, default=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"))
 args = parser.parse_args()
 
 # Initialize DesktopEnv
@@ -47,9 +49,9 @@ env = DesktopEnv(
     path_to_vm=args.path_to_vm,
     os_type=args.os_type,
     action_space=args.action_space,
-    headless=args.headless  
+    headless=args.headless,
+    region=args.region  
 )
-
 print("Starting OSWorld environment...")
 obs = env.reset(task_config=example)
 print("Environment reset complete!")

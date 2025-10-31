@@ -1,0 +1,12 @@
+# environment.yml
+name: cs294
+channels:
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+
+  - pip:
+      - poetry>=2.2
