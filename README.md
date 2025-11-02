@@ -80,7 +80,7 @@ curl -s "http://127.0.0.1:${GREEN_AGENT_PORT}/health" | jq .
 ./scripts/run_slice.sh random 5
 ```
 
-For full control (slice choice, filters, auth, etc.), see [§7.3 Batch slices (offline metrics)](#73-batch-slices-offline-metrics).
+For full control (slice choice, filters, auth, etc.), see [§6.3 Batch slices (offline metrics)](#63-batch-slices-offline-metrics).
 
 
 Outputs:
@@ -99,7 +99,7 @@ results/
 ```
 
 
-## 2) Architecture (Minimal Viable Loop)
+## 2) Architecture
 
 ```
 AgentBeats (Platform)
@@ -160,23 +160,10 @@ cs294-ai-agent/
 ```
 
 
-## 4) Key Environment Variables
-
-| Variable                 | Purpose                       | Example                  |
-| ------------------------ | ----------------------------- | ------------------------ |
-| `GREEN_AGENT_HOST/PORT`  | Green bind address/port       | `0.0.0.0` / `18080`      |
-| `GREEN_REQUIRE_AUTH`     | Turn A2A auth on/off          | `true/false`             |
-| `GREEN_AUTH_TOKEN`       | Token for header or path auth | `6c15...f98`             |
-| `WHITE_AGENT_URL`        | White A2A base URL            | `http://127.0.0.1:18081` |
-| `GREEN_TASKSET`          | Slice selector                | `verified_small`         |
-| `GREEN_ENFORCE_NOGDRIVE` | Skip Google Drive tasks       | `true`                   |
-| `GREEN_SKIP_PROXY`       | Skip proxy-only validations   | `false`                  |
-| `SCREEN_SIZE`            | Desktop resolution            | `1920x1080`              |
-
 > When exposing the Green service publicly, open **TCP 18080** to your **own IP** in the security group (avoid `0.0.0.0/0`).
 
 
-## 5) White A2A (Minimal Contract)
+## 4) White A2A
 
 **Request** `POST /act` (Green → White)
 
@@ -223,7 +210,7 @@ Green runs the loop until `done` or limits reached and returns:
 ```
 
 
-## 6) AgentBeats Integration Notes
+## 5) AgentBeats Integration Notes
 
 * **Card discovery (registration)**
 
@@ -241,9 +228,9 @@ Green runs the loop until `done` or limits reached and returns:
 > Browsers may hit `GET /act` or `/favicon.ico` while testing; you’ll see `405`/`404`. Those are expected and harmless.
 
 
-## 7) Local Testing & Dev Tips
+## 6) Local Testing & Dev Tips
 
-### 7.1 One-shot health & smoke
+### 6.1 One-shot health & smoke
 
 ```bash
 source scripts/setup_env.sh
@@ -252,7 +239,7 @@ source scripts/setup_env.sh
 ./scripts/green_smoke.sh
 ```
 
-### 7.2 A2A probe (AgentBeats-like)
+### 6.2 A2A probe (AgentBeats-like)
 
 ```bash
 # Run “/card once + /act k times” with auth automatically
@@ -261,7 +248,7 @@ source scripts/setup_env.sh
 
 ---
 
-### 7.3 Batch slices (offline metrics)
+### 6.3 Batch slices (offline metrics)
 
 You can batch-run OSWorld tasks through the Green A2A endpoint to produce repeatable, platform-friendly metrics.
 
