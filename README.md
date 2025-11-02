@@ -1,143 +1,407 @@
-# 1. Initialize
+# OSWorld ↔ AgentBeats Green Agent (A2A)
 
-## 1.1 Configure Environment
+This project delivers a **Green judge (FastAPI)** that connects **OSWorld** to **AgentBeats** via a minimal **A2A** contract. Any White Agent that implements `/act` can plug in, operate the OSWorld desktop, and return standardized results and artifacts.
+
+## 1) Quickstart
+
+### 1.1 Install
 
 ```bash
-# Create and activate the Conda env
+# Python 3.11 recommended
 conda env create -f environment.yml
 conda activate cs294
 
-# Use the project’s Python (no separate Poetry venv)
+# Use project Python (no new Poetry venv)
 poetry config virtualenvs.create false --local
 poetry install --no-root
 ```
 
-## 1.2 Quickstart Test
+### 1.2 `.env` Configuration
 
-### Full AWS Configuration Reference
-
-For detailed setup instructions, see the official guide:
+> Full AWS setup reference:
 [OSWorld AWS Guideline](https://github.com/xlang-ai/OSWorld/blob/main/desktop_env/providers/aws/AWS_GUIDELINE.md)
 
----
-
-### Required AWS Permissions
-
-The quickstart will create **EC2 instances**, **IAM roles/policies**, and other AWS resources.
-Ensure the IAM user whose access keys you use has sufficient permissions.
-
-**Minimum (for testing only):**
-
-* `AdministratorAccess`
-* `AmazonEC2FullAccess`
-* `IAMFullAccess`
-
-> Prefer least-privilege configurations for production environments.
-
----
-
-### Create Programmatic Credentials (AWS Console)
-
-1. Open **IAM → Users → Create user**.
-2. Select **Programmatic access** (to generate access keys).
-3. Attach the required policy — either **AdministratorAccess** or the combination of **AmazonEC2FullAccess** and **IAMFullAccess**.
-4. Complete creation and **download the `.csv` file**, which contains your **Access key ID** and **Secret access key**.
-5. Add these keys to your project’s **`.env`** file (recommended) or to `~/.aws/credentials` if using an AWS profile.
-
----
-
-**Example `.env`:**
+Minimal example (fill with your own values):
 
 ```bash
+# ---------- AWS / OSWorld ----------
+# Region used when Green spins up OSWorld desktops
 AWS_REGION=us-east-1
 AWS_DEFAULT_REGION=us-east-1
-AWS_SUBNET_ID=subnet-xxxxxxx
-AWS_SECURITY_GROUP_ID=sg-xxxxxxx
-AWS_ACCESS_KEY_ID=AKIAxxxxxxx
-AWS_SECRET_ACCESS_KEY=xxxxxxx
-AWS_VPC_ID=vpc-xxxxxxx
+
+# Your AWS credentials (DO NOT COMMIT REAL VALUES)
+AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxxxxxxxx
+AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Networking for EC2 instances (from your AWS account)
+AWS_VPC_ID=vpc-xxxxxxxx
+AWS_SUBNET_ID=subnet-xxxxxxxx
+AWS_SECURITY_GROUP_ID=sg-xxxxxxxx
+AWS_KEY_NAME= # your EC2 keypair name
+
+# A2A auth (enable + token). Generate with:
+#   python -c "import secrets; print(secrets.token_hex(16))"
+GREEN_REQUIRE_AUTH=true
+GREEN_AUTH_TOKEN=paste_random_hex_here
+GREEN_USE_PATH_TOKEN=false
+```
+
+Generate a random token for `GREEN_AUTH_TOKEN`:
+
+```bash
+python - <<'PY'
+import secrets; print(secrets.token_hex(16))
+PY
+```
+
+### 1.3 Start & Smoke Test
+
+```bash
+# Load env + print masked key vars
+source scripts/setup_env.sh
+
+# Start a baseline White (replace with your White URL anytime)
+./scripts/start_white_sim.sh
+
+# Start Green (port checks, auth, HTTP-backend guard)
+./scripts/start_green.sh
+
+# Health (no auth required)
+curl -s "http://127.0.0.1:${GREEN_AGENT_PORT}/health" | jq .
+
+# Minimal smoke (auto-injects auth if configured)
+./scripts/green_smoke.sh
+```
+
+### 1.4 Run Slices (batch)
+
+```bash
+# Randomly sample 5 examples
+./scripts/run_slice.sh random 5
+```
+
+For full control (slice choice, filters, auth, etc.), see [§7.3 Batch slices (offline metrics)](#73-batch-slices-offline-metrics).
+
+
+Outputs:
+
+```
+results/
+├─ green_runs/<task_id>-<UTC>/
+│  ├─ frames/                 # step PNGs
+│  ├─ trace.jsonl             # per-step action/reward/done
+│  ├─ result.json             # single-task result (A2A-aligned)
+│  ├─ summary.json            # header/footer info (region/provider/screen)
+│  └─ artifact.json           # artifact manifest for archiving
+└─ summary/
+   ├─ summary_<mode>_<slice>_<ts>.csv
+   └─ summary_<mode>_<slice>_<ts>.jsonl
+```
+
+
+## 2) Architecture (Minimal Viable Loop)
+
+```
+AgentBeats (Platform)
+        │
+        ▼  A2A (/card, /reset, /act)
+Green Server (FastAPI)
+        │                 ┌──────── White Agent (any team)
+        ├───► /act ───────┤        A2A: /card, /reset, /act
+        │                 └──────── Action: {type: code|special, ...}
+        ▼
+OSWorldAdapter
+        ▼
+DesktopEnv.reset / step("pyautogui code"|WAIT) / close
+        ▲
+  reward / done / obs(screenshot+a11y)
+```
+
+* **Green**: spins up `DesktopEnv`, loops **observe → ask White → execute → observe**, records traces and metrics, returns a unified result.
+* **White**: only implements `/act`; consumes screenshot (base64) + optional a11y; returns next action (pyautogui code or `WAIT/DONE/FAIL`).
+
+
+## 3) Code Layout
+
+```
+cs294-ai-agent/
+├─ scripts/
+│  ├─ setup_env.sh                 # load .env, activate conda, print masked vars
+│  ├─ start_green.sh               # start Green (port guard, logs, backend guard)
+│  ├─ stop_green.sh                # stop Green
+│  ├─ start_white_sim.sh           # start baseline White (WAIT→SCROLL→DONE)
+│  ├─ stop_white_sim.sh            # stop baseline White
+│  ├─ green_smoke.sh               # one-button smoke /act (curl; auto-auth)
+│  ├─ run_slice.sh                 # batch runner (small/domain/single/random/indices)
+│  └─ a2a_probe.sh                 # AgentBeats-like probe (/card + /act×k)
+│
+├─ green/
+│  ├─ app.py                       # /card /reset /act; auth (header/path); .well-known
+│  ├─ a2a_models.py                # A2A request/response/action/observation schemas
+│  ├─ osworld_adapter.py           # thin wrapper of DesktopEnv.reset/step/wait/close
+│  ├─ white_client.py              # HTTP client to call White /card /reset /act
+│  ├─ result_writer.py             # result.json, trace.jsonl, frames, artifact.json
+│  └─ validators.py                # env guards (no HTTP backend, etc.)
+│
+├─ white_sim/
+│  └─ server.py                    # toy White: /card /reset /act (WAIT→SCROLL→DONE)
+│
+├─ run_modes/
+│  └─ runner.py                    # unified batch runner (slice/filter/auth/CSV+JSONL)
+│
+├─ tools/
+│  └─ a2a_probe.py                 # A2A probe (GET /card, POST /act×k)
+│
+├─ results/
+│  ├─ green_runs/<task_id>-<UTC>/  # per-run artifacts
+│  └─ summary/                     # batch summaries
+│
+└─ third_party/osworld/            # vendored upstream (no changes)
+```
+
+
+## 4) Key Environment Variables
+
+| Variable                 | Purpose                       | Example                  |
+| ------------------------ | ----------------------------- | ------------------------ |
+| `GREEN_AGENT_HOST/PORT`  | Green bind address/port       | `0.0.0.0` / `18080`      |
+| `GREEN_REQUIRE_AUTH`     | Turn A2A auth on/off          | `true/false`             |
+| `GREEN_AUTH_TOKEN`       | Token for header or path auth | `6c15...f98`             |
+| `WHITE_AGENT_URL`        | White A2A base URL            | `http://127.0.0.1:18081` |
+| `GREEN_TASKSET`          | Slice selector                | `verified_small`         |
+| `GREEN_ENFORCE_NOGDRIVE` | Skip Google Drive tasks       | `true`                   |
+| `GREEN_SKIP_PROXY`       | Skip proxy-only validations   | `false`                  |
+| `SCREEN_SIZE`            | Desktop resolution            | `1920x1080`              |
+
+> When exposing the Green service publicly, open **TCP 18080** to your **own IP** in the security group (avoid `0.0.0.0/0`).
+
+
+## 5) White A2A (Minimal Contract)
+
+**Request** `POST /act` (Green → White)
+
+```json
+{
+  "instruction": "Natural-language task instruction",
+  "observation": {
+    "screenshot_b64": "<base64 PNG>",
+    "a11y_tree": null,
+    "width": 1920,
+    "height": 1080
+  },
+  "tools": ["mouse","keyboard","scroll","wait"],
+  "step": 3
+}
+```
+
+**Response (action: code)**
+
+```json
+{ "type": "code", "code": "pyautogui.click(960, 540)", "pause": 0.5 }
+```
+
+**Response (control: special)**
+
+```json
+{ "type": "special", "name": "WAIT", "pause": 0.5 }
+{ "type": "special", "name": "DONE", "pause": 0.0 }
+{ "type": "special", "name": "FAIL", "pause": 0.0 }
+```
+
+Green runs the loop until `done` or limits reached and returns:
+
+```json
+{
+  "task_id": "...",
+  "success": true,
+  "reward": 1.0,
+  "steps": 7,
+  "wall_time_sec": 85.3,
+  "logs_dir": "results/green_runs/<task_id>-<UTC>",
+  "details": { "backend": "python-api", "provider": "aws", "limits": {...}, "agent_version": "0.1.0", "env_signature": "..." }
+}
+```
+
+
+## 6) AgentBeats Integration Notes
+
+* **Card discovery (registration)**
+
+  * Header auth: `GET /card` with `X-Auth-Token`
+  * Path auth: `GET /t/<token>/.well-known/agent-card.json`
+
+* **Battle invocation**
+
+  * `POST /act` (or `/t/<token>/act`): returns the unified result schema above.
+
+* **Offline metrics submission**
+
+  * Upload `results/summary/summary_*.csv` or `jsonl` to the platform’s designated place.
+
+> Browsers may hit `GET /act` or `/favicon.ico` while testing; you’ll see `405`/`404`. Those are expected and harmless.
+
+
+## 7) Local Testing & Dev Tips
+
+### 7.1 One-shot health & smoke
+
+```bash
+source scripts/setup_env.sh
+./scripts/start_white_sim.sh
+./scripts/start_green.sh
+./scripts/green_smoke.sh
+```
+
+### 7.2 A2A probe (AgentBeats-like)
+
+```bash
+# Run “/card once + /act k times” with auth automatically
+./scripts/a2a_probe.sh 5
 ```
 
 ---
 
-### Load Environment Variables
+### 7.3 Batch slices (offline metrics)
 
-```bash
-# Load .env safely and export all key-value pairs
-set -a
-. .env
-set +a
-```
+You can batch-run OSWorld tasks through the Green A2A endpoint to produce repeatable, platform-friendly metrics.
 
----
+#### What is a “slice”?
 
-### Verify Environment
+A **slice** is the meta list used to enumerate tasks (files under `third_party/osworld/evaluation_examples/`):
 
-```bash
-env | grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|DEFAULT_REGION|REGION|SUBNET_ID|SECURITY_GROUP_ID|VPC_ID|KEY_NAME)' || true
-```
+* `test_small` – quick sanity set
+* `verified_small` – curated/verified small set
+* `test_all` – full set
+* `verified_all` – curated/verified full set
+* `nodrive` – excludes any Google Drive tasks
+* Or any explicit meta file name, e.g. `custom_team_slice.json`
 
---- 
+#### Supported modes
 
-### Run OSWorld Quickstart
+* `small` — run the entire chosen slice
+* `domain` — run all examples from one domain
+* `single` — run exactly one example as `domain/example_id`
+* `random` — run a random subset of size `k`
+* `indices` — run specific 0-based indices within the slice (deterministic)
 
-```bash
-cd third_party/osworld
-python quickstart.py --provider_name aws --os_type Ubuntu
-```
-
-## 1.3 Green Agent Smoke Test
-
-From the **project root**, run:
-
-```bash
-source scripts/test_green_smoke.sh
-```
+> Outputs land in:
+>
+> * Requests: `results/requests/act_*.json`
+> * Responses: `results/responses/resp_*.json`
+> * Summary CSV: `results/summary/summary_<mode>_<slice>_<ts>.csv`
+> * Index map: `results/summary/indices_<slice>_<ts>.csv`
+> * Per-run artifacts (from Green’s `/act`): see `logs_dir` → `result.json`, `summary.json`, `trace.jsonl`, `frames/step_*.png`.
 
 ---
 
-# 2. Submodule Update
-
-To update the AgentBeats submodule:
+#### A) Quick script usage
 
 ```bash
-git fetch agentbeats
-git subtree pull --prefix=third_party/agentbeats agentbeats main --squash
+# Run the small slice (defaults to `test_small` inside the script)
+./scripts/run_slice.sh small
+
+# Run an entire domain from the current script’s default slice
+./scripts/run_slice.sh domain chrome
+
+# Randomly sample 10 examples
+./scripts/run_slice.sh random 10
 ```
+
+> Tip: If you need finer control (pick a specific slice, toggle filters, pass auth styles), use the **direct Python** form below.
 
 ---
 
-# 3. Platform Architecture
+#### B) Direct Python (full control)
 
+Common flags:
+
+* `--slice <name>`: `test_small|verified_small|test_all|verified_all|nodrive|<file.json>`
+* `--mode <m>`: `small|domain|single|random|indices`
+* `--host/--port`: Green endpoint (default `127.0.0.1:18080`)
+* `--region`: AWS region for OSWorld (default `us-east-1`)
+* `--max-steps / --max-seconds`: per-episode limits
+* `--screen`: desktop resolution, e.g. `1920x1080`
+* Filters: `--nogdrive`, `--no-proxy`
+* Auth:
+
+  * Header token: `--token "$GREEN_AUTH_TOKEN"`
+  * Path token: `--use-path-token --token "$GREEN_AUTH_TOKEN"`
+
+**Run entire slice (`verified_small`)**
+
+```bash
+python run_modes/runner.py \
+  --mode small \
+  --slice verified_small \
+  --host 127.0.0.1 --port 18080 \
+  --region us-east-1 \
+  --screen 1920x1080 \
+  --max-steps 30 --max-seconds 300 \
+  --nogdrive \
+  --token "$GREEN_AUTH_TOKEN"
 ```
-┌──────────────────────────────────────┐
-│          AgentBeats (Evaluation)     │
-│    ↳ Calls Green Agent to test       │
-│      White Agents via A2A protocol   │
-└──────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│           Green Agent (Judge)        │
-│  1. Load test definitions (JSON)     │
-│  2. Invoke White Agent for tasks     │
-│  3. Collect results and compute      │
-│     evaluation metrics               │
-└──────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│          White Agent (Subject)       │
-│  1. Read instructions and screenshots│
-│  2. Use LLM to generate actions      │
-│     (e.g., pyautogui)                │
-│  3. Execute through DesktopEnv API   │
-└──────────────────────────────────────┘
-                 │
-                 ▼
-┌──────────────────────────────────────┐
-│             OSWorld (Env)            │
-│  Virtual desktop, API control,       │
-│  evaluation rules and logging        │
-└──────────────────────────────────────┘
+
+**Run a specific domain from `verified_all`**
+
+```bash
+python run_modes/runner.py \
+  --mode domain \
+  --slice verified_all \
+  --domain chrome \
+  --nogdrive --no-proxy \
+  --token "$GREEN_AUTH_TOKEN"
+```
+
+**Run a single example (`domain/example_id`)**
+
+```bash
+python run_modes/runner.py \
+  --mode single \
+  --slice test_all \
+  --example libreoffice_writer/001_open_new_document \
+  --max-steps 60 --max-seconds 600 \
+  --token "$GREEN_AUTH_TOKEN"
+```
+
+**Randomly sample 10 (deterministic with seed)**
+
+```bash
+python run_modes/runner.py \
+  --mode random \
+  --slice test_all \
+  --k 10 \
+  --seed 123 \
+  --nogdrive \
+  --token "$GREEN_AUTH_TOKEN"
+```
+
+**Run by indices from `verified_small` (e.g., #0, #7, #42)**
+
+```bash
+python run_modes/runner.py \
+  --mode indices \
+  --slice verified_small \
+  --indices 0,7,42 \
+  --token "$GREEN_AUTH_TOKEN"
+```
+
+**Call a remote Green with path-token**
+
+```bash
+python run_modes/runner.py \
+  --mode small \
+  --slice verified_small \
+  --host A.B.C.D --port 18080 \
+  --use-path-token --token "$GREEN_AUTH_TOKEN"
+```
+
+**Override desktop size/timeouts**
+
+```bash
+python run_modes/runner.py \
+  --mode random --slice test_all --k 5 \
+  --screen 2560x1440 \
+  --max-steps 40 --max-seconds 480 \
+  --timeout 1200 \
+  --token "$GREEN_AUTH_TOKEN"
 ```

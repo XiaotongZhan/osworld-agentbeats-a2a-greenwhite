@@ -100,7 +100,7 @@ echo "▶️  Running: python $OSWORLD_DIR/run_multienv_qwen25vl.py ..."
     --observation_type screenshot \
     --model "$MODEL" \
     --result_dir "$REPO_ROOT/results/smoke" \
-    --max_steps 3 \
+    --max_steps 10 \
     --num_envs 1 \
     --provider_name aws \
     --region "${AWS_REGION:-us-east-1}" \
