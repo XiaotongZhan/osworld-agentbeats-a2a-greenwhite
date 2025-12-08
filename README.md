@@ -136,10 +136,16 @@ cs294-ai-agent/
 │  ├─ start_green.sh               # start Green (port guard, logs, backend guard)
 │  ├─ stop_green.sh                # stop Green
 │  ├─ start_white_sim.sh           # start baseline White
+│  ├─ start_white_sim.sh           # start baseline White
 │  ├─ stop_white_sim.sh            # stop baseline White
 │  ├─ green_smoke.sh               # one-button smoke /act (curl; auto-auth, direct Green)
 │  ├─ test_green_smoke.sh          # dev helper: extra smoke test for Green endpoint
+│  ├─ green_smoke.sh               # one-button smoke /act (curl; auto-auth, direct Green)
+│  ├─ test_green_smoke.sh          # dev helper: extra smoke test for Green endpoint
 │  ├─ run_slice.sh                 # batch runner (small/domain/single/random/indices)
+│  ├─ start_agentbeats_ctrl.sh     # start AgentBeats controller (manages Green for AB)
+│  └─ stop_agentbeats_ctrl.sh      # stop AgentBeats controller
+|
 │  ├─ start_agentbeats_ctrl.sh     # start AgentBeats controller (manages Green for AB)
 │  └─ stop_agentbeats_ctrl.sh      # stop AgentBeats controller
 |
@@ -235,6 +241,7 @@ source scripts/setup_env.sh
 
 ---
 
+### 6.2 Batch slices (offline metrics)
 ### 6.2 Batch slices (offline metrics)
 
 You can batch-run OSWorld tasks through the Green A2A endpoint to produce repeatable, platform-friendly metrics.
@@ -407,19 +414,16 @@ bash scripts/stop_agentbeats_ctrl.sh
 
 The easiest way to confirm that the **AgentBeats controller + Green agent** are working is to open the controller info page in a browser:
 
-> If running on AWS EC2, remember to add **port 20080** to the inbound rules (Security Group) before accessing the controller page.
-
-
 * If you are on the **server itself** (SSH with port-forwarding or X11 etc.):
 
   ```text
-  http://127.0.0.1:20080/info
+  http://127.0.0.1:18080/info
   ```
 
 * If you are checking from **another machine** and your server has a public IP, use that IP instead, for example:
 
   ```text
-  http://107.21.71.139:20080/info
+  http://107.21.71.139:18080/info
   ```
 
 On that page, verify two things:
@@ -453,9 +457,9 @@ Once the controller is running and the info page looks good (Section 7.1–7.2):
 3. When the guide asks you to fill in the **Controller URL**, use the Green controller you just started:
 
    ```text
-   http://YOUR_PUBLIC_HOST:20080
+   http://YOUR_PUBLIC_HOST:18080
    ```
 
 4. Complete the remaining steps exactly as described in the slides.
 
-Once you finish the registration flow in the slides, your OSWorld Green agent (controller at `:20080`) will be available on the AgentBeats platform and can be used in battles/evaluations.
+Once you finish the registration flow in the slides, your OSWorld Green agent (controller at `:18080`) will be available on the AgentBeats platform and can be used in battles/evaluations.
