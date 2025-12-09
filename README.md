@@ -63,6 +63,7 @@ PY
 
 ```bash
 # Load env + print masked key vars
+chmod +x scripts/*.sh
 source scripts/setup_env.sh
 
 # Start a baseline White (replace with your White URL anytime)
@@ -85,7 +86,7 @@ curl -s "http://127.0.0.1:${GREEN_AGENT_PORT}/health" | jq .
 ./scripts/run_slice.sh random 5
 ```
 
-For full control (slice choice, filters, auth, etc.), see [§6.3 Batch slices (offline metrics)](#63-batch-slices-offline-metrics).
+For full control (slice choice, filters, auth, etc.), see [§6.2 Batch slices (offline metrics)](#62-batch-slices-offline-metrics).
 
 
 Outputs:
@@ -364,7 +365,7 @@ python run_modes/runner.py \
 python run_modes/runner.py \
   --mode small \
   --slice verified_small \
-  --host A.B.C.D --port 18080 \
+  --host A.B.C.D --port 18081 \
   --use-path-token --token "$GREEN_AUTH_TOKEN"
 ```
 

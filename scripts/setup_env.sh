@@ -67,8 +67,13 @@ load_env_file ".env.local"
 mask() { local v="$1"; [ -n "$v" ] && printf "%s********\n" "${v:0:8}" || printf "<unset>\n"; }
 
 echo "AWS_REGION=${AWS_REGION:-<unset>}"
-echo -n "OPENAI_API_KEY=";       mask "${OPENAI_API_KEY:-}"
-echo -n "ANTHROPIC_API_KEY=";    mask "${ANTHROPIC_API_KEY:-}"
-echo -n "DASHSCOPE_API_KEY=";    mask "${DASHSCOPE_API_KEY:-}"
-echo -n "AZURE_OPENAI_API_KEY="; mask "${AZURE_OPENAI_API_KEY:-}"
+# echo -n "OPENAI_API_KEY=";       mask "${OPENAI_API_KEY:-}"
+# echo -n "ANTHROPIC_API_KEY=";    mask "${ANTHROPIC_API_KEY:-}"
+# echo -n "DASHSCOPE_API_KEY=";    mask "${DASHSCOPE_API_KEY:-}"
+# echo -n "AZURE_OPENAI_API_KEY="; mask "${AZURE_OPENAI_API_KEY:-}"
 echo "Environment setup complete!"
+
+# ========= 2.5 OSWorld AMI preflight check =========
+if [ "${GREEN_CHECK_AMI:-true}" != "false" ]; then
+  bash scripts/check_osworld_ami.sh
+fi
