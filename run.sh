@@ -13,7 +13,7 @@ source scripts/setup_env.sh
 # Use the environment variables injected by the AgentBeats controller:
 #   - AGENT_PORT: port assigned to this agent instance
 #   - HOST: usually 0.0.0.0 or 127.0.0.1
-PORT="${AGENT_PORT:-18081}"
+PORT="${AGENT_PORT:-18080}"
 HOST="${HOST:-0.0.0.0}"
 
 # ========= 3. Safety guard: do not use OSWorld HTTP endpoint =========

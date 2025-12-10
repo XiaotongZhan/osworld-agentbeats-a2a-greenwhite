@@ -15,12 +15,12 @@ fi
 # The controller listens on HOST:PORT on this VM.
 # You can override these via environment variables if needed.
 CTRL_HOST="${GREEN_CTRL_HOST:-0.0.0.0}"
-CTRL_PORT="${GREEN_CTRL_PORT:-18080}"
+CTRL_PORT="${GREEN_CTRL_PORT:-20080}"
 
 # This is the *public* host:port that AgentBeats Studio / external callers use.
 # IMPORTANT: No "http://" prefix here. The controller will prepend it.
 # Default is your current IP:port.
-PUBLIC_HOST_PORT="${GREEN_CTRL_PUBLIC_HOST:-107.21.71.139:18080}"
+PUBLIC_HOST_PORT="${GREEN_CTRL_PUBLIC_HOST:-107.21.71.139:20080}"
 
 # The controller expects CLOUDRUN_HOST to be "<host>:<port>"
 export CLOUDRUN_HOST="${PUBLIC_HOST_PORT}"
