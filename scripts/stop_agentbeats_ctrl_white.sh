@@ -4,11 +4,11 @@ set -euo pipefail
 # Change to project root
 cd "$(dirname "$0")/.." || exit 1
 
-LOG_DIR="logs/controller"
+LOG_DIR="logs/controller_white"
 PID_FILE="${LOG_DIR}/controller.pid"
 
 if [ ! -f "${PID_FILE}" ]; then
-  echo "[info] No controller PID file found at ${PID_FILE}. Nothing to stop."
+  echo "[info] No WHITE controller PID file found at ${PID_FILE}. Nothing to stop."
   exit 0
 fi
 
@@ -21,12 +21,12 @@ if [ -z "${CTRL_PID}" ]; then
 fi
 
 if kill -0 "${CTRL_PID}" 2>/dev/null; then
-  echo "[info] Stopping AgentBeats controller (pid=${CTRL_PID})..."
+  echo "[info] Stopping AgentBeats WHITE controller (pid=${CTRL_PID})..."
   kill "${CTRL_PID}" 2>/dev/null || true
   sleep 2
 
   if kill -0 "${CTRL_PID}" 2>/dev/null; then
-    echo "[warn] Controller still running, sending SIGKILL..."
+    echo "[warn] WHITE controller still running, sending SIGKILL..."
     kill -9 "${CTRL_PID}" 2>/dev/null || true
   fi
 else
@@ -34,4 +34,4 @@ else
 fi
 
 rm -f "${PID_FILE}"
-echo "[ok] Controller stopped and PID file removed."
+echo "[ok] WHITE controller stopped and PID file removed."
