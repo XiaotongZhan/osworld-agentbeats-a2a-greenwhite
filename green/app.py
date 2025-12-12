@@ -1,11 +1,11 @@
-# green/app.py
-import asyncio, os, time, uuid, re, json
+import asyncio, os, time, uuid, re, json, random
 from datetime import datetime, timezone
 from pathlib import Path
 from hashlib import sha256
+from typing import Any, Dict, Tuple, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,7 +21,7 @@ load_dotenv(ROOT / ".env", override=False)
 
 WHITE_AGENT_URL = os.getenv(
     "WHITE_AGENT_URL",
-    f"http://127.0.0.1:{os.getenv('WHITE_PORT', '18081')}"
+    f"http://127.0.0.1:{os.getenv('WHITE_PORT', '18081')}",
 )
 OSWORLD_CLIENT_PASSWORD = os.getenv("OSWORLD_CLIENT_PASSWORD", "osworld-public-evaluation")
 
@@ -51,6 +51,7 @@ def _make_run_dir(task_id: str) -> Path:
             latest.unlink()
         latest.symlink_to(run_dir, target_is_directory=True)
     except Exception:
+        # Symlink failure should not kill the run.
         pass
     return run_dir
 
@@ -74,7 +75,7 @@ def _classify_failure(exc: Exception) -> str:
 
 
 # ---------------- auth helpers ----------------
-def _pick_token_from_headers(x_auth_token: str | None, authorization: str | None) -> str | None:
+def _pick_token_from_headers(x_auth_token: Optional[str], authorization: Optional[str]) -> Optional[str]:
     """Accept X-Auth-Token or Authorization: Bearer <token>."""
     if x_auth_token:
         return x_auth_token.strip()
@@ -83,7 +84,7 @@ def _pick_token_from_headers(x_auth_token: str | None, authorization: str | None
     return None
 
 
-def _enforce_auth(header_token: str | None = None, path_token: str | None = None) -> None:
+def _enforce_auth(header_token: Optional[str] = None, path_token: Optional[str] = None) -> None:
     """Enforce auth unless disabled by GREEN_REQUIRE_AUTH=false."""
     if not REQUIRE_AUTH:
         return
@@ -95,7 +96,30 @@ def _enforce_auth(header_token: str | None = None, path_token: str | None = None
 
 
 # ---------------- card & signature helpers ----------------
-def _card_payload() -> dict:
+def _get_agent_url() -> str:
+    """
+    The `url` field used inside the agent card.
+
+    - When running under AgentBeats controller:
+        The controller injects AGENT_URL with the externally visible URL
+        (typically http://HOST:PORT/to_agent/<cagent_id>), so we return
+        that value unchanged.
+
+    - Local debugging:
+        When AGENT_URL is missing, return an empty string. AgentBeats does
+        not strictly require this field for local tests.
+    """
+    return os.getenv("AGENT_URL", "")
+
+
+def _agent_version() -> str:
+    try:
+        return CardResponse().version
+    except Exception:
+        return "0.1.0"
+
+
+def _card_payload() -> Dict[str, Any]:
     """
     Return the MCP-style agent card that AgentBeats v2 expects.
 
@@ -104,11 +128,9 @@ def _card_payload() -> dict:
     """
     return {
         "capabilities": {
-            # Green agent uses synchronous HTTP; no token-level streaming
             "streaming": False
         },
         "defaultInputModes": [
-            # Green assessor is typically kicked off via text instructions
             "text"
         ],
         "defaultOutputModes": [
@@ -119,15 +141,12 @@ def _card_payload() -> dict:
             "It hosts the OSWorld GUI environment and evaluates assessee agents "
             "via the A2A protocol."
         ),
-        # This name will be shown in the AgentBeats UI
         "name": "osworld_green_agent_mcp",
-        # AgentBeats controller <-> agent transport
-        "preferredTransport": "JSONRPC",
-        # MCP Agent Card protocol version used by AgentBeats v2
+        # "preferredTransport": "JSONRPC",
+        "preferredTransport": "HTTP",
         "protocolVersion": "0.3.0",
         "skills": [
             {
-                # Unique skill identifier
                 "id": "host_assess_osworld_green",
                 "name": "OSWorld-Green assessment hosting",
                 "description": (
@@ -140,7 +159,6 @@ def _card_payload() -> dict:
                     "osworld",
                     "desktop",
                 ],
-                # Example of how to invoke this assessment host
                 "examples": [
                     (
                         "Your task is to instantiate the OSWorld-Green benchmark to "
@@ -158,18 +176,9 @@ def _card_payload() -> dict:
                 ],
             }
         ],
-        # AgentBeats backend will fill this with the actual agent URL
-        "url": "",
-        # Reuse the current agent version
+        "url": _get_agent_url(),
         "version": _agent_version(),
     }
-
-
-def _agent_version() -> str:
-    try:
-        return CardResponse().version
-    except Exception:
-        return "0.1.0"
 
 
 def _iso_utc(ts: float) -> str:
@@ -219,6 +228,136 @@ def _write_artifact_json(
     return str(out)
 
 
+# -------- env_config & white_agent_url parsing --------
+def _parse_white_url_from_instruction(instruction: Optional[str]) -> Optional[str]:
+    """Extract <white_agent_url>...</white_agent_url> from the instruction, if present."""
+    if not instruction:
+        return None
+    m = re.search(r"<white_agent_url>\\s*(.*?)\\s*</white_agent_url>", instruction, re.DOTALL)
+    if not m:
+        return None
+    url = m.group(1).strip()
+    return url or None
+
+
+def _parse_env_config_from_instruction(instruction: Optional[str]) -> Dict[str, Any]:
+    """
+    Parse an optional <env_config>{...}</env_config> JSON blob from
+    the instruction text. Returns {} if not present or invalid.
+    """
+    if not instruction:
+        return {}
+    m = re.search(r"<env_config>\\s*(\\{.*?\\})\\s*</env_config>", instruction, re.DOTALL)
+    if not m:
+        return {}
+    raw = m.group(1)
+    try:
+        return json.loads(raw)
+    except Exception as e:
+        print(f"[warn] Failed to parse <env_config>: {e}")
+        return {}
+
+
+def _choose_osworld_task(env_cfg: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """
+    Map env_config into a single OSWorld task_config.
+
+    Supports:
+      1) direct:
+         - env_cfg["task_config"] is a dict
+
+      2) random:
+         - mode="random"
+         - slice="test_all"/"test_small"/...
+         - reads OSWorld meta JSON from third_party/osworld/evaluation_examples/<slice>.json
+
+    OSWorld meta file format is typically:
+      - dict: { "<domain>": ["<example_id>", ...], ... }
+    """
+    # ---- direct task_config ----
+    direct_cfg = env_cfg.get("task_config")
+    if isinstance(direct_cfg, dict):
+        tid = env_cfg.get("task_id") or direct_cfg.get("task_id") or "osworld_task"
+        return str(tid), direct_cfg
+
+    mode = env_cfg.get("mode", "single")
+    if mode != "random":
+        raise RuntimeError(
+            "env_config must contain either a 'task_config' dict or mode='random'. "
+            f"Got mode={mode!r}"
+        )
+
+    EVAL_ROOT = ROOT / "third_party" / "osworld" / "evaluation_examples"
+
+    slice_name = env_cfg.get("slice", "test_all")
+    meta_path = env_cfg.get("meta_path") or (EVAL_ROOT / f"{slice_name}.json")
+    meta_path = Path(meta_path)
+
+    if not meta_path.is_file():
+        raise RuntimeError(f"OSWorld meta file not found: {meta_path}")
+
+    with meta_path.open("r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    # ---- build candidates from meta ----
+    candidates: list[tuple[str, str]] = []
+
+    if isinstance(meta, dict):
+        # OSWorld standard format: domain -> [ids]
+        for domain, ids in meta.items():
+            if not isinstance(ids, list):
+                continue
+            for ex_id in ids:
+                if isinstance(ex_id, str) and ex_id.strip():
+                    candidates.append((str(domain), ex_id.strip()))
+    elif isinstance(meta, list):
+        # fallback (non-standard) format: list of items containing domain/id or config_path
+        # we try to interpret it best-effort
+        for item in meta:
+            if not isinstance(item, dict):
+                continue
+            domain = item.get("domain")
+            ex_id = item.get("id") or item.get("example_id")
+            if isinstance(domain, str) and isinstance(ex_id, str):
+                candidates.append((domain.strip(), ex_id.strip()))
+    else:
+        raise RuntimeError(f"Invalid meta json format (expect dict or list): {meta_path}")
+
+    if not candidates:
+        raise RuntimeError(f"Invalid or empty meta file: {meta_path}")
+
+    # ---- optional nogdrive filter (best-effort) ----
+    nogdrive = bool(env_cfg.get("nogdrive"))
+    if nogdrive:
+        # OSWorld examples are not always "gdrive"; keep this lightweight.
+        filtered = []
+        for domain, ex_id in candidates:
+            text = f"{domain}/{ex_id}".lower()
+            if "gdrive" in text or "google_drive" in text or "google-drive" in text:
+                continue
+            filtered.append((domain, ex_id))
+        if filtered:
+            candidates = filtered
+
+    # ---- sample one ----
+    seed = env_cfg.get("seed")
+    rng = random.Random(seed)
+    domain, ex_id = rng.choice(candidates)
+
+    # ---- load concrete task config ----
+    cfg_path = EVAL_ROOT / "examples" / domain / f"{ex_id}.json"
+    if not cfg_path.is_file():
+        raise RuntimeError(f"Task config JSON not found: {cfg_path}")
+
+    with cfg_path.open("r", encoding="utf-8") as f:
+        task_cfg = json.load(f)
+
+    # task id for logging
+    task_id = env_cfg.get("task_id") or task_cfg.get("task_id") or f"{domain}__{ex_id}"
+    return str(task_id), task_cfg
+
+
+
 # ---------------- FastAPI app ----------------
 app = FastAPI(title="OSWorld Green Agent", version="0.1.0")
 
@@ -251,37 +390,70 @@ async def _act_core(req: ActRequest) -> JSONResponse:
     if not ok:
         raise HTTPException(status_code=500, detail=mode)
 
-    assess_id = req.task_id or str(uuid.uuid4())
+    # Parse optional env_config + white_agent_url from instruction
+    instruction = getattr(req, "instruction", "")
+    env_cfg = _parse_env_config_from_instruction(instruction)
+
+    white_url = (
+        env_cfg.get("white_agent_url")
+        or env_cfg.get("white_url")
+        or _parse_white_url_from_instruction(instruction)
+        or WHITE_AGENT_URL
+    )
+
+    # Decide which OSWorld task to run.
+    osworld_cfg = getattr(req, "osworld", None)
+    task_config = getattr(osworld_cfg, "task_config", None) if osworld_cfg is not None else None
+    task_id: str
+    if isinstance(task_config, dict):
+        # ActRequest already carries a task_config (e.g. from Earthshaker OSWorld plugin).
+        task_id = (
+            getattr(req, "task_id", None)
+            or task_config.get("task_id")
+            or task_config.get("name")
+            or "osworld_task"
+        )
+    else:
+        # Fall back to env_config-based selection (random or direct task_config)
+        if not env_cfg:
+            raise HTTPException(
+                status_code=400,
+                detail="No OSWorld task_config provided and <env_config> is missing.",
+            )
+        task_id, task_config = _choose_osworld_task(env_cfg)
+
+    assess_id = getattr(req, "task_id", None) or task_id or str(uuid.uuid4())
     run_dir = _make_run_dir(assess_id)
     writer = ResultWriter(run_dir)
 
-    screen_w = getattr(req.osworld, "screen_width", 1920)
-    screen_h = getattr(req.osworld, "screen_height", 1080)
+    # Basic geometry (used for env + metadata)
+    screen_w = getattr(osworld_cfg, "screen_width", 1920) if osworld_cfg is not None else 1920
+    screen_h = getattr(osworld_cfg, "screen_height", 1080) if osworld_cfg is not None else 1080
 
     header = {
         "task_id": assess_id,
         "region": os.getenv("AWS_REGION", "<unset>"),
-        "white_agent": WHITE_AGENT_URL,
-        "provider": req.osworld.provider_name,
+        "white_agent": white_url,
+        "provider": getattr(osworld_cfg, "provider_name", None) if osworld_cfg is not None else None,
         "screen": [screen_w, screen_h],
+        "env_config": env_cfg,
     }
     writer.write_summary({"start": header})
 
-    white = WhiteAgentClient(WHITE_AGENT_URL)
+    white = WhiteAgentClient(white_url)
     env = None
     steps = 0
     t0 = time.time()
     reward_final = 0.0
     done = False
 
-    # Unified metadata fields
     region = os.getenv("AWS_REGION", "<unset>")
     agent_ver = _agent_version()
     env_sig = _make_env_signature(mode, region, screen_w, screen_h)
     seed_val = getattr(req, "seed", None)
 
     try:
-        # Optional white reset
+        # Optional white reset (best-effort)
         try:
             await white.reset()
         except Exception:
@@ -289,23 +461,24 @@ async def _act_core(req: ActRequest) -> JSONResponse:
 
         # Bring up OSWorld
         env = OSWorldAdapter(
-            provider_name=req.osworld.provider_name,
-            os_type=req.osworld.os_type,
-            region=req.osworld.region,
+            provider_name=getattr(osworld_cfg, "provider_name", None) if osworld_cfg is not None else None,
+            os_type=getattr(osworld_cfg, "os_type", None) if osworld_cfg is not None else None,
+            region=getattr(osworld_cfg, "region", None) if osworld_cfg is not None else None,
             screen_size=(screen_w, screen_h),
             client_password=OSWORLD_CLIENT_PASSWORD,
         )
 
         # Reset in background thread
-        obs = await run_in_thread(env.reset, req.osworld.task_config)
+        obs = await run_in_thread(env.reset, task_config)
         writer.save_frame(steps, obs.get("screenshot_b64"))
 
+        # Limits for this run
+        limits = getattr(req, "limits", None)
+        max_steps = getattr(limits, "max_steps", 50) if limits is not None else 50
+        max_seconds = getattr(limits, "max_seconds", 300.0) if limits is not None else 300.0
+
         # Main loop
-        while (
-            steps < req.limits.max_steps
-            and (time.time() - t0) < req.limits.max_seconds
-            and not done
-        ):
+        while steps < max_steps and (time.time() - t0) < max_seconds and not done:
             steps += 1
 
             observation = Observation(
@@ -316,7 +489,7 @@ async def _act_core(req: ActRequest) -> JSONResponse:
             )
 
             try:
-                action = await white.act(req.instruction, observation, steps)
+                action = await white.act(instruction, observation, steps)
             except Exception as e:
                 raise HTTPException(status_code=502, detail=f"White /act error: {e}")
 
@@ -356,7 +529,7 @@ async def _act_core(req: ActRequest) -> JSONResponse:
 
         wall = time.time() - t0
 
-        # Write result.json, then generate artifact.json and attach its path to details
+        # Build ActResult
         result = ActResult(
             task_id=assess_id,
             success=(reward_final > 0.0),
@@ -365,12 +538,13 @@ async def _act_core(req: ActRequest) -> JSONResponse:
             wall_time_sec=wall,
             logs_dir=str(run_dir),
             details={
-                "limits": req.limits.model_dump(),
-                "provider": req.osworld.provider_name,
+                "limits": limits.model_dump() if limits is not None else None,
+                "provider": getattr(osworld_cfg, "provider_name", None) if osworld_cfg is not None else None,
                 "backend": "python-api",
                 "seed": seed_val,
                 "agent_version": agent_ver,
                 "env_signature": env_sig,
+                "env_config": env_cfg,
             },
         )
         writer.write_result(result.model_dump())
@@ -385,7 +559,8 @@ async def _act_core(req: ActRequest) -> JSONResponse:
         wall = max(0.0, time.time() - t0)
         failure_type = _classify_failure(e)
 
-        # Even on failure, generate artifact.json with a result.json describing the failure
+        limits = getattr(req, "limits", None)
+
         result = ActResult(
             task_id=assess_id,
             success=False,
@@ -394,8 +569,8 @@ async def _act_core(req: ActRequest) -> JSONResponse:
             wall_time_sec=wall,
             logs_dir=str(run_dir),
             details={
-                "limits": req.limits.model_dump(),
-                "provider": req.osworld.provider_name,
+                "limits": limits.model_dump() if limits is not None else None,
+                "provider": getattr(osworld_cfg, "provider_name", None) if osworld_cfg is not None else None,
                 "backend": "python-api",
                 "failure_type": failure_type,
                 "message": str(e),
@@ -404,6 +579,7 @@ async def _act_core(req: ActRequest) -> JSONResponse:
                 "env_signature": _make_env_signature(
                     mode, os.getenv("AWS_REGION", "<unset>"), screen_w, screen_h
                 ),
+                "env_config": env_cfg,
             },
         )
         writer.write_result(result.model_dump())
@@ -426,8 +602,8 @@ async def _act_core(req: ActRequest) -> JSONResponse:
 # ---------- header-auth endpoints (keep existing URLs) ----------
 @app.get("/card")
 async def card(
-    x_auth_token: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
+    x_auth_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     _enforce_auth(_pick_token_from_headers(x_auth_token, authorization), None)
     return JSONResponse(content=_card_payload())
@@ -435,8 +611,8 @@ async def card(
 
 @app.post("/reset")
 async def reset(
-    x_auth_token: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
+    x_auth_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     _enforce_auth(_pick_token_from_headers(x_auth_token, authorization), None)
     return {"reset": "ok"}
@@ -445,8 +621,8 @@ async def reset(
 @app.post("/act")
 async def act(
     req: ActRequest,
-    x_auth_token: str | None = Header(default=None),
-    authorization: str | None = Header(default=None),
+    x_auth_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
 ):
     _enforce_auth(_pick_token_from_headers(x_auth_token, authorization), None)
     return await _act_core(req)
@@ -470,6 +646,85 @@ async def act_t(token: str, req: ActRequest):
     _enforce_auth(None, token)
     return await _act_core(req)
 
+@app.post("/", include_in_schema=False)
+async def a2a_jsonrpc_root(
+    request: Request,
+    x_auth_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    A2A JSON-RPC entrypoint.
+
+    The AgentBeats controller sends JSON-RPC requests to this path:
+      - method = "card"  -> query the agent card
+      - method = "reset" -> reset the agent runtime state
+      - method = "act"   -> ask the Green agent to run one OSWorld evaluation
+
+    This handler simply forwards these JSON-RPC methods to the existing
+    HTTP-based handler logic.
+    """
+    # Apply the same authentication logic as /card, /reset, and /act
+    _enforce_auth(_pick_token_from_headers(x_auth_token, authorization), None)
+
+    payload = await request.json()
+    method = payload.get("method")
+    params = payload.get("params") or {}
+    rpc_id = payload.get("id")
+    rpc_version = payload.get("jsonrpc", "2.0")
+
+    # ---- 1. card ----
+    if method == "card":
+        # Reuse the internal agent card payload construction logic
+        result_obj = _card_payload()
+
+    # ---- 2. reset ----
+    elif method == "reset":
+        # Reuse the existing /reset route logic
+        # (authentication will be checked again, which is harmless)
+        result_obj = await reset(
+            x_auth_token=x_auth_token,
+            authorization=authorization,
+        )
+
+    # ---- 3. act ----
+    elif method == "act":
+        # `params` may either directly contain ActRequest fields,
+        # or be wrapped as {"request": {...}}. Support both formats.
+        if isinstance(params, dict) and "request" in params:
+            act_payload = params["request"]
+        else:
+            act_payload = params
+
+        # Validate and construct ActRequest
+        act_req = ActRequest.model_validate(act_payload)
+
+        # Invoke the existing core logic (returns a JSONResponse)
+        resp: JSONResponse = await _act_core(act_req)
+
+        # Extract the actual JSON content from the JSONResponse
+        try:
+            result_obj = json.loads(resp.body.decode("utf-8"))
+        except Exception:
+            # In theory resp.body should always exist; this is a defensive fallback
+            rendered = resp.render()
+            result_obj = json.loads(rendered.decode("utf-8"))
+
+    else:
+        # AgentBeats should only send card/reset/act.
+        # This branch is a defensive fallback.
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported JSON-RPC method: {method!r}",
+        )
+
+    # Return a JSON-RPC 2.0 compliant response
+    return JSONResponse(
+        content={
+            "jsonrpc": rpc_version,
+            "id": rpc_id,
+            "result": result_obj,
+        }
+    )
 
 # ---------- well-known endpoints (PUBLIC for AgentBeats) ----------
 @app.get("/.well-known/agent-card.json", include_in_schema=False)
