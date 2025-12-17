@@ -213,7 +213,25 @@ def main():
         if args.k <= 0:
             raise SystemExit("[FATAL] --k must be positive for mode=random")
         random.seed(args.seed)
-        pairs = random.sample(all_pairs, min(args.k, len(all_pairs)))
+
+        # IMPORTANT:
+        # We want k *runnable* tasks. If filters (nogdrive/no-proxy) skip a sampled task,
+        # we keep sampling until we collect k runnable ones (or exhaust the slice).
+        shuffled = list(all_pairs)
+        random.shuffle(shuffled)
+
+        pairs = []
+        for (d, ex) in shuffled:
+            cfg = _load_example(d, ex)
+            skip, _reason = _should_skip(cfg, d, skip_gdrive=args.nogdrive, skip_proxy=args.no_proxy)
+            if skip:
+                continue
+            pairs.append((d, ex))
+            if len(pairs) >= args.k:
+                break
+
+        if not pairs:
+            raise SystemExit("[FATAL] After applying filters, no runnable tasks remain in this slice.")
     elif args.mode == "indices":
         if not args.indices:
             raise SystemExit("[FATAL] --indices is required for mode=indices")

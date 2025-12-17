@@ -1,120 +1,214 @@
 # OSWorld × AgentBeats: Green Judge & White Agents (A2A Integration)
 
-This project provides:
+This repository provides:
 
-* a **Green judge (FastAPI)** that runs OSWorld desktops and evaluates agents via an **A2A** contract, and
-* baseline **White agents** (e.g., `white_sim`) that implement `/act`.
+* **Green Judge (OSWorld-Green):** a service that launches OSWorld desktops (AWS) and evaluates a White agent via a simple action API.
+* **White agents:**
+  * `white_sim` — a baseline White agent (simple heuristic policy).
+  * `white_agent` — our official White agent powered by Qwen3-VL (DashScope) that outputs executable `pyautogui` actions.
 
-Any external White agent that speaks the same A2A contract can plug in and operate the OSWorld desktop.
+The key design is **modularity**:
 
-## 1) Quickstart
+* Green runs the OSWorld environment and the evaluation loop.
+* White only needs to implement a small contract: `/card`, `/reset`, `/act`.
+* Any external White agent that speaks the same contract can plug into Green.
+
+---
+
+## 1) Quickstart (Local Repro)
 
 ### 1.1 Install
 
+Tested with **Python 3.13**.
+
 ```bash
-# Python 3.11 recommended
-conda env create -f environment.yml
+# Create and activate conda env
+conda create -n cs294 python=3.13 -y
 conda activate cs294
 
-# Use project Python (no new Poetry venv)
+# Install dependencies (poetry uses the conda env python; no extra venv)
+pip install -U pip poetry
 poetry config virtualenvs.create false --local
 poetry install --no-root
+````
+
+### 1.2 .env Configuration
+
+Copy the template and fill your own values:
+
+```bash
+cp .env.example .env
 ```
 
-### 1.2 `.env` Configuration
-
-> Full AWS setup reference:
-[OSWorld AWS Guideline](https://github.com/xlang-ai/OSWorld/blob/main/desktop_env/providers/aws/AWS_GUIDELINE.md)
-
-Minimal example (fill with your own values):
+Minimum required variables:
 
 ```bash
 # ---------- AWS / OSWorld ----------
-# Region used when Green spins up OSWorld desktops
 AWS_REGION=us-east-1
 AWS_DEFAULT_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_VPC_ID=...
+AWS_SUBNET_ID=...
+AWS_SECURITY_GROUP_ID=...
+AWS_KEY_NAME=...
 
-# Your AWS credentials (DO NOT COMMIT REAL VALUES)
-AWS_ACCESS_KEY_ID=AKIAxxxxxxxxxxxxxxxx
-AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# ---------- White LLM (for Qwen3-VL White) ----------
+DASHSCOPE_API_KEY=...
 
-# Networking for EC2 instances (from your AWS account)
-AWS_VPC_ID=vpc-xxxxxxxx
-AWS_SUBNET_ID=subnet-xxxxxxxx
-AWS_SECURITY_GROUP_ID=sg-xxxxxxxx
-AWS_KEY_NAME= # your EC2 keypair name
-
-# A2A auth (enable + token). Generate with:
-#   python -c "import secrets; print(secrets.token_hex(16))"
-GREEN_REQUIRE_AUTH=true
-GREEN_AUTH_TOKEN=paste_random_hex_here
+# ---------- Optional: Green auth (if you enable it) ----------
+GREEN_REQUIRE_AUTH=false
+GREEN_AUTH_TOKEN=
 GREEN_USE_PATH_TOKEN=false
 ```
 
-Generate a random token for `GREEN_AUTH_TOKEN`:
+Then load env (idempotent, prints masked signals and runs AMI preflight by default):
 
 ```bash
-python - <<'PY'
-import secrets; print(secrets.token_hex(16))
-PY
+source scripts/setup_env.sh
 ```
 
-### 1.3 Start & Smoke Test
+---
+
+## 2) Local End-to-End Testing (Recommended)
+
+You have two local workflows:
+
+* **Workflow A (simple):** background scripts (`scripts/start_*.sh`)
+* **Workflow B (debug/foreground):** controller-style `*_ctrl/run.sh` (closer to AgentBeats deployment)
+
+### 2.1 Workflow A — Simple Local Start (baseline White)
+
+Start baseline White + Green (HTTP mode):
 
 ```bash
-# Load env + print masked key vars
-chmod +x scripts/*.sh
 source scripts/setup_env.sh
-
-# Start a baseline White (replace with your White URL anytime)
 ./scripts/start_white_sim.sh
-
-# Start Green (port checks, auth, HTTP-backend guard)
 ./scripts/start_green.sh
+```
 
-# Health (no auth required)
-curl -s "http://127.0.0.1:${GREEN_AGENT_PORT}/health" | jq .
+Smoke test (direct Green endpoint):
 
-# Minimal smoke (auto-injects auth if configured)
+```bash
 ./scripts/green_smoke.sh
 ```
 
-### 1.4 Run Slices (batch)
+Stop:
 
 ```bash
-# Randomly sample 5 examples
-./scripts/run_slice.sh random 5
+./scripts/stop_green.sh
+./scripts/stop_white_sim.sh
 ```
 
-For full control (slice choice, filters, auth, etc.), see [§6.2 Batch slices (offline metrics)](#62-batch-slices-offline-metrics).
+For full control (slice choice, filters, auth, etc.), see [§8 Local Testing & Dev Tips](#8-local-testing--dev-tips).
 
+### 2.2 Workflow B — Foreground Local Start (Official White + Green) + Runner
 
-Outputs:
+This is the exact workflow we use to validate the official White agent (`white_agent`) with the slice runner.
 
+#### Step 0) Ensure OSWorld evaluation examples are available
+
+Some utilities expect `evaluation_examples/` at repo root. If missing, symlink it:
+
+```bash
+cd ~/zxt/agentbeats-green-osworld
+if [ ! -e evaluation_examples ]; then
+  ln -s third_party/osworld/evaluation_examples evaluation_examples
+fi
 ```
+
+#### Step 1) Start the official White agent (Qwen3-VL)
+
+```bash
+conda activate cs294
+cd ~/zxt/agentbeats-green-osworld
+source scripts/setup_env.sh
+
+export AGENT_PORT=18081
+export AGENT_ID=local
+./white_ctrl/run.sh
+```
+
+Check:
+
+```bash
+curl -s http://127.0.0.1:18081/card
+```
+
+#### Step 2) Start Green in HTTP mode (so the local runner.py can call /act)
+
+```bash
+conda activate cs294
+cd ~/zxt/agentbeats-green-osworld
+source scripts/setup_env.sh
+
+export WHITE_AGENT_URL="http://127.0.0.1:18081"
+export AGENT_PORT=18080
+export AGENT_ID=local
+
+# IMPORTANT:
+# For local runner, Green must expose REST endpoints (/card /reset /act).
+# Make sure green_ctrl/run.sh is configured to run green.app:app (HTTP mode) in .env file.
+./green_ctrl/run.sh
+```
+
+Check:
+
+```bash
+curl -s http://127.0.0.1:18080/card | head
+curl -s -X POST http://127.0.0.1:18080/reset | head
+```
+
+#### Step 3) Run slice evaluation via runner (deterministic)
+
+```bash
+conda activate cs294
+cd ~/zxt/agentbeats-green-osworld
+source scripts/setup_env.sh
+
+python run_modes/runner.py \
+  --mode random \
+  --slice test_small \
+  --k 1 \
+  --seed 52 \
+  --nogdrive \
+  --host 127.0.0.1 \
+  --port 18080 \
+  --max-steps 30 \
+  --max-seconds 900 \
+  --no-proxy
+```
+
+Outputs are written to:
+
+```text
 results/
 ├─ green_runs/<task_id>-<UTC>/
-│  ├─ frames/                 # step PNGs
-│  ├─ trace.jsonl             # per-step action/reward/done
-│  ├─ result.json             # single-task result (A2A-aligned)
-│  ├─ summary.json            # header/footer info (region/provider/screen)
-│  └─ artifact.json           # artifact manifest for archiving
+│  ├─ frames/                 # step screenshots
+│  ├─ trace.jsonl             # action trace
+│  ├─ result.json             # per-task result
+│  ├─ summary.json            # environment + run metadata
+│  └─ artifact.json           # artifact manifest
 └─ summary/
    ├─ summary_<mode>_<slice>_<ts>.csv
    └─ summary_<mode>_<slice>_<ts>.jsonl
 ```
 
+---
 
-## 2) Architecture
+## 3) Architecture
 
-```
+```text
 AgentBeats (Platform)
         │
-        ▼  A2A (/card, /reset, /act)
-Green Server (FastAPI)
-        │                 ┌──────── White Agent (any team)
-        ├───► /act ───────┤        A2A: /card, /reset, /act
-        │                 └──────── Action: {type: code|special, ...}
+        ▼  A2A (Agent card + /act)
+Green (A2A wrapper for platform)
+        │
+        ▼  internal evaluation loop (OSWorld)
+Green Service (HTTP: /reset /act)
+        │                 ┌──────── White Agent (HTTP)
+        ├───► /act ───────┤        /card /reset /act
+        │                 └──────── returns action (pyautogui code or special)
         ▼
 OSWorldAdapter
         ▼
@@ -123,49 +217,31 @@ DesktopEnv.reset / step("pyautogui code"|WAIT) / close
   reward / done / obs(screenshot+a11y)
 ```
 
-* **Green**: spins up `DesktopEnv`, loops **observe → ask White → execute → observe**, records traces and metrics, returns a unified result.
-* **White**: only implements `/act`; consumes screenshot (base64) + optional a11y; returns next action (pyautogui code or `WAIT/DONE/FAIL`).
+### 3.1 Green responsibilities
 
+* Launch OSWorld desktop (AWS) via `DesktopEnv`.
+* Loop: observe → query White → execute → log until done/limits.
+* Write artifacts: screenshots, action traces, result summaries.
 
-## 3) Code Layout
+### 3.2 White responsibilities
 
-```
-cs294-ai-agent/
-├─ scripts/
-│  ├─ setup_env.sh                 # load .env, activate conda, print masked vars
-│  ├─ start_green.sh               # start Green (port guard, logs, backend guard)
-│  ├─ stop_green.sh                # stop Green
-│  ├─ start_white_sim.sh           # start baseline White
-│  ├─ start_white_sim.sh           # start baseline White
-│  ├─ stop_white_sim.sh            # stop baseline White
-│  ├─ green_smoke.sh               # one-button smoke /act (curl; auto-auth, direct Green)
-│  ├─ test_green_smoke.sh          # dev helper: extra smoke test for Green endpoint
-│  ├─ green_smoke.sh               # one-button smoke /act (curl; auto-auth, direct Green)
-│  ├─ test_green_smoke.sh          # dev helper: extra smoke test for Green endpoint
-│  ├─ run_slice.sh                 # batch runner (small/domain/single/random/indices)
-│  ├─ start_agentbeats_ctrl.sh     # start AgentBeats controller (manages Green for AB)
-│  └─ stop_agentbeats_ctrl.sh      # stop AgentBeats controller
-|
-│  ├─ start_agentbeats_ctrl.sh     # start AgentBeats controller (manages Green for AB)
-│  └─ stop_agentbeats_ctrl.sh      # stop AgentBeats controller
-|
-├─ green/
-│  ├─ app.py                       # /card /reset /act; auth (header/path); .well-known
-│  ├─ a2a_models.py                # A2A request/response/action/observation schemas
-│  ├─ osworld_adapter.py           # thin wrapper of DesktopEnv.reset/step/wait/close
-│  ├─ white_client.py              # HTTP client to call White /card /reset /act
-│  ├─ result_writer.py             # result.json, trace.jsonl, frames, artifact.json
-│  └─ validators.py                # env guards (no HTTP backend, etc.)
-│
-├─ run_modes/
-│  └─ runner.py                    # unified batch runner (slice/filter/auth/CSV+JSONL)
-│
-└─ third_party/osworld/            # vendored upstream (no changes)
-```
+At each step, White receives:
 
-## 4) White A2A
+* natural language instruction
+* screenshot (base64 PNG)
+* optional a11y tree and screen metadata
+* step index + tool hints
 
-**Request** `POST /act` (Green → White)
+White outputs:
+
+* either executable `pyautogui` code (mouse/keyboard/scroll), or
+* a special control action: `WAIT`, `DONE`, `FAIL`
+
+---
+
+## 4) White HTTP Contract
+
+Request `POST /act` (Green → White)
 
 ```json
 {
@@ -181,56 +257,143 @@ cs294-ai-agent/
 }
 ```
 
-**Response (action: code)**
+Response (action: code)
 
 ```json
 { "type": "code", "code": "pyautogui.click(960, 540)", "pause": 0.5 }
 ```
 
-**Response (control: special)**
+Response (control: special)
 
 ```json
 { "type": "special", "name": "WAIT", "pause": 0.5 }
+```
+
+```json
 { "type": "special", "name": "DONE", "pause": 0.0 }
+```
+
+```json
 { "type": "special", "name": "FAIL", "pause": 0.0 }
 ```
 
-Green runs the loop until `done` or limits reached and returns:
+---
 
-```json
-{
-  "task_id": "...",
-  "success": true,
-  "reward": 1.0,
-  "steps": 7,
-  "wall_time_sec": 85.3,
-  "logs_dir": "results/green_runs/<task_id>-<UTC>",
-  "details": { "backend": "python-api", "provider": "aws", "limits": {...}, "agent_version": "0.1.0", "env_signature": "..." }
-}
+## 5) Code Layout (High-Level)
+
+```text
+agentbeats-green-osworld/
+├─ green/                      # Green judge core (OSWorld evaluation loop)
+│  ├─ app.py                   # HTTP endpoints (/card /reset /act)
+│  ├─ a2a_app.py               # A2A wrapper (platform-facing)
+│  ├─ osworld_adapter.py
+│  ├─ white_client.py
+│  └─ result_writer.py
+│
+├─ white_sim/                  # Baseline White (heuristic)
+│  └─ server.py
+│
+├─ white_agent/                # Official White (Qwen3-VL / DashScope)
+│  ├─ server.py
+│  └─ policy/...
+│
+├─ green_ctrl/                 # controller-style run scripts for Green
+│  └─ run.sh
+├─ white_ctrl/                 # controller-style run scripts for White
+│  └─ run.sh
+│
+├─ scripts/                    # one-command helpers (start/stop/smoke)
+│  ├─ setup_env.sh
+│  ├─ start_green.sh / stop_green.sh
+│  ├─ start_white_sim.sh / stop_white_sim.sh
+│  ├─ start_agentbeats_ctrl_green.sh / stop_agentbeats_ctrl_green.sh
+│  └─ start_agentbeats_ctrl_white.sh / stop_agentbeats_ctrl_white.sh
+│
+└─ run_modes/
+   └─ runner.py                # slice runner (random/domain/single/indices)
 ```
 
+---
 
-## 5) AgentBeats Integration Notes
+## 6) AgentBeats Integration (Battle-Ready)
 
-* **Card discovery (registration)**
+### 6.1 Start AgentBeats controller for Green
 
-  * Header auth: `GET /card` with `X-Auth-Token`
-  * Path auth: `GET /t/<token>/.well-known/agent-card.json`
+On your server (make sure port is allowed in the security group):
 
-* **Battle invocation**
+```bash
+# Make sure green_ctrl/run.sh is configured to run green.a2a_app:app mode in .env file.
+bash scripts/start_agentbeats_ctrl_green.sh
+```
 
-  * `POST /act` (or `/t/<token>/act`): returns the unified result schema above.
+Default controller info page:
 
-* **Offline metrics submission**
+```text
+http://<YOUR_PUBLIC_HOST>:20080/info
+```
 
-  * Upload `results/summary/summary_*.csv` or `jsonl` to the platform’s designated place.
+### 6.2 Start AgentBeats controller for White
 
-> Browsers may hit `GET /act` or `/favicon.ico` while testing; you’ll see `405`/`404`. Those are expected and harmless.
+```bash
+bash scripts/start_agentbeats_ctrl_white.sh
+```
 
+Default controller info page:
 
-## 6) Local Testing & Dev Tips
+```text
+http://<YOUR_PUBLIC_HOST>:20081/info
+```
 
-### 6.1 One-shot health & smoke
+### 6.3 Register on AgentBeats and battle
+
+* Register the controller URL for Green and White on the platform UI.
+* Start a battle/assessment; the platform passes the White URL to Green, and Green runs OSWorld + calls White.
+
+Stop controllers:
+
+```bash
+bash scripts/stop_agentbeats_ctrl_green.sh
+bash scripts/stop_agentbeats_ctrl_white.sh
+```
+
+---
+
+## 7) Troubleshooting
+
+### 7.1 Missing proxy config under evaluation_examples/...
+
+If you see errors like missing `evaluation_examples/settings/proxy/...`, either:
+
+* create the symlink (see §2.2 Step 0), or
+* run runner with `--no-proxy` (recommended).
+
+### 7.2 DashScope “response has no text content”
+
+This is an upstream API failure mode. Confirm:
+
+* `DASHSCOPE_API_KEY` is set correctly
+* network access is stable
+* retry behavior is enabled (the policy already retries)
+
+### 7.3 Port already in use
+
+Use:
+
+```bash
+lsof -i :<PORT>
+```
+
+Stop previous processes or choose another port.
+
+### 7.4 OSWorld AMI preflight fails
+
+`scripts/setup_env.sh` runs an AMI visibility check. Fix AWS region/credentials/VPC/subnet/security-group config in `.env`.
+
+---
+
+## 8) Local Testing & Dev Tips
+
+### 8.1 One-shot health & smoke
 
 ```bash
 source scripts/setup_env.sh
@@ -241,8 +404,7 @@ source scripts/setup_env.sh
 
 ---
 
-### 6.2 Batch slices (offline metrics)
-### 6.2 Batch slices (offline metrics)
+### 8.2 Batch slices (offline metrics)
 
 You can batch-run OSWorld tasks through the Green A2A endpoint to produce repeatable, platform-friendly metrics.
 
@@ -386,97 +548,3 @@ python run_modes/runner.py \
   --timeout 1200 \
   --token "$GREEN_AUTH_TOKEN"
 ```
-
-
-## 7) AgentBeats Controller Integration (Green as Remote Judge/ White)
-
-This section explains how to expose the **OSWorld Green agent** behind an **AgentBeats controller** on your own server, so that it can be registered and used from the AgentBeats web UI.
-
-
-### 7.1 Start the AgentBeats controller on your server
-
-On **your server**, from the project root, simply run:
-
-```bash
-bash scripts/start_agentbeats_ctrl_green.sh
-```
-
-For White_sim:
-
-```bash
-bash scripts/start_agentbeats_ctrl_white.sh
-```
-
-To stop the controller (and the managed Green instance), run:
-
-```bash
-bash scripts/stop_agentbeats_ctrl_green.sh
-```
-
-For White_sim:
-
-```bash
-bash scripts/stop_agentbeats_ctrl_white.sh
-```
-
-> If you want to run this on a different port or with a different public host,
-> edit `scripts/start_agentbeats_ctrl.sh` and adjust `CLOUDRUN_HOST`, `HOST`, and `PORT` accordingly.
-
-### 7.2 Check the controller + Green from the server
-
-The easiest way to confirm that the **AgentBeats controller + Green agent** are working is to open the controller info page in a browser:
-
-> If running on AWS EC2, remember to add **port 20080** to the inbound rules (Security Group) before accessing the controller page.
-
-
-* If you are on the **server itself** (SSH with port-forwarding or X11 etc.):
-
-  ```text
-  http://127.0.0.1:20080/info
-  ```
-
-> For White_sim: the default port is 20081
-
-* If you are checking from **another machine** and your server has a public IP, use that IP instead, for example:
-
-  ```text
-  http://107.21.71.139:20080/info
-  ```
-
-On that page, verify two things:
-
-1. At the top, the status card shows:
-
-   ```text
-   Running Agent / Maintained Agent  1 / 1
-   ```
-
-   This means the controller has successfully started exactly one Green agent and is maintaining it.
-
-2. In the **“Agent Instances”** section at the bottom:
-
-   * Expand the single agent card.
-   * Open the **“Agent Card”** panel.
-   * You should see a JSON MCP card (with fields like `name`, `protocolVersion`, `skills`, etc.), **without** any red error message about local IPs.
-
-
----
-
-### 7.3 Register the Green controller on AgentBeats
-
-Once the controller is running and the info page looks good (Section 7.1–7.2):
-
-1. Open the official platform guide:
-   [Notes – Using the agentbeats v2 platform – 2025.11](https://docs.google.com/presentation/d/1g6D9a_uUiqudNlRvoRy4L4JmHkdMinFSTBra6bPgayM/edit)
-
-2. In that slide, follow the steps for **registering a agent** on AgentBeats.
-
-3. When the guide asks you to fill in the **Controller URL**, use the Green controller you just started:
-
-   ```text
-   http://YOUR_PUBLIC_HOST:20080
-   ```
-
-4. Complete the remaining steps exactly as described in the slides.
-
-Once you finish the registration flow in the slides, your OSWorld Green agent (controller at `:20080`) will be available on the AgentBeats platform and can be used in battles/evaluations.
