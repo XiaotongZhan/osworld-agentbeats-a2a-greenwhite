@@ -10,10 +10,6 @@ if [ -f "scripts/setup_env.sh" ]; then
   source scripts/setup_env.sh
 fi
 
-# Bind address and port
-# AgentBeats controller typically injects:
-#   - AGENT_PORT: port assigned to this green instance
-#   - HOST: usually 0.0.0.0
 PORT="${AGENT_PORT:-18080}"
 HOST="${HOST:-0.0.0.0}"
 
@@ -26,7 +22,6 @@ fi
 # Ensure OSWorld can be imported
 export PYTHONPATH="$(pwd)/third_party/osworld:${PYTHONPATH:-}"
 
-# Dedicated logs for AgentBeats-managed green instances
 LOG_DIR="logs/green_agentbeats"
 mkdir -p "${LOG_DIR}"
 
@@ -35,14 +30,13 @@ TS="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${LOG_DIR}/green_ab_${AGENT_ID}_${TS}.out"
 LATEST_LINK="${LOG_DIR}/green_ab.latest.out"
 
-echo "[info] Starting green (A2A) on ${HOST}:${PORT}"
+# Default to FastAPI implementation (has /card /reset /act) for local runner + AgentBeats HTTP transport.
+APP_IMPORT="${GREEN_APP_IMPORT:-green.a2a_app:app}"
+
+echo "[info] Starting green (${APP_IMPORT}) on ${HOST}:${PORT}"
 echo "[info] Logging to ${LOG_FILE}"
 
 ln -sf "$(basename "${LOG_FILE}")" "${LATEST_LINK}" 2>/dev/null || true
 
-# Run uvicorn in the foreground and mirror output to both stdout and log file
-# Do not background this process; the controller manages its lifecycle.
-# uvicorn green.app:app --host "${HOST}" --port "${PORT}" --workers 1 \
-#   2>&1 | tee -a "${LOG_FILE}"
-uvicorn green.a2a_app:app --host "${HOST}" --port "${PORT}" --workers 1 \
+uvicorn "${APP_IMPORT}" --host "${HOST}" --port "${PORT}" --workers 1 \
   2>&1 | tee -a "${LOG_FILE}"

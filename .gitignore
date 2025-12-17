@@ -99,3 +99,4 @@ Thumbs.db
 *.7z
 
 .ab/
+.draft/

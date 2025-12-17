@@ -142,8 +142,8 @@ def _card_payload() -> Dict[str, Any]:
             "via the A2A protocol."
         ),
         "name": "osworld_green_agent_mcp",
-        # "preferredTransport": "JSONRPC",
-        "preferredTransport": "HTTP",
+        "preferredTransport": "JSONRPC",
+        # "preferredTransport": "HTTP",
         "protocolVersion": "0.3.0",
         "skills": [
             {
