@@ -34,6 +34,9 @@ poetry install --no-root
 
 ### 1.2 .env Configuration
 
+> Full AWS setup reference:
+[OSWorld AWS Guideline](https://github.com/xlang-ai/OSWorld/blob/main/desktop_env/providers/aws/AWS_GUIDELINE.md)
+
 Copy the template and fill your own values:
 
 ```bash
@@ -346,7 +349,8 @@ http://<YOUR_PUBLIC_HOST>:20081/info
 
 ### 6.3 Register on AgentBeats and battle
 
-* Register the controller URL for Green and White on the platform UI.
+* Register the controller URL for Green and White on the platform UI. Please follow the official platform guide:
+   [Notes – Using the agentbeats v2 platform – 2025.11](https://docs.google.com/presentation/d/1g6D9a_uUiqudNlRvoRy4L4JmHkdMinFSTBra6bPgayM/edit)
 * Start a battle/assessment; the platform passes the White URL to Green, and Green runs OSWorld + calls White.
 
 Stop controllers:
